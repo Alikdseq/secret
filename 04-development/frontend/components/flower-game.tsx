@@ -218,6 +218,7 @@ export function FlowerGame() {
       if (!pointers.current.has(event.pointerId)) return;
       pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (!pinch.current || pointers.current.size < 2 || !selected) return;
+      event.preventDefault();
       const [a, b] = [...pointers.current.values()];
       const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
       const angle = Math.atan2(b.y - a.y, b.x - a.x);
@@ -230,7 +231,7 @@ export function FlowerGame() {
       if (pointers.current.size < 2) pinch.current = null;
     };
     window.addEventListener("pointerdown", down);
-    window.addEventListener("pointermove", move);
+    window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
     return () => {
@@ -318,12 +319,13 @@ export function FlowerGame() {
   function place(flowerId: string, at: { x: number; y: number } | null, image?: string) {
     const flower = getFridgeFlower(flowerId);
     if (!flower?.available) return;
+    const id = `${flowerId}-${Date.now()}-${stemsRef.current.length}`;
     remember();
     setStems((current) => {
       const used = current.filter((stem) => stem.flowerId === flowerId).length;
       const spot = openingSpot(current.length, flower.role);
       const born: Stem = {
-        id: `${flowerId}-${Date.now()}-${current.length}`,
+        id,
         flowerId,
         image: image || pickImage(flower, used),
         x: at?.x ?? spot.x,
@@ -338,12 +340,14 @@ export function FlowerGame() {
     });
     setHint(false);
     setFlash(`+${rub(flower.price)}`);
-    setSelected(null);
+    setSelected(id);
   }
 
-  function updateStem(id: string, patch: Partial<Stem>, keepHistory = false) {
+  function updateStem(id: string, patch: Partial<Stem> | ((stem: Stem) => Partial<Stem>), keepHistory = false) {
     if (keepHistory) remember();
-    setStems((current) => current.map((stem) => (stem.id === id ? { ...stem, ...patch } : stem)));
+    setStems((current) =>
+      current.map((stem) => (stem.id === id ? { ...stem, ...(typeof patch === "function" ? patch(stem) : patch) } : stem)),
+    );
   }
 
   function removeStem(id: string, record = true) {
@@ -419,13 +423,59 @@ export function FlowerGame() {
   }
 
   function takeFlower(event: React.PointerEvent, flower: FridgeFlower) {
-    if (!flower.available || !fine) return;
-    event.preventDefault();
+    if (!flower.available) return;
     const used = stems.filter((stem) => stem.flowerId === flower.id).length;
-    const start: Drag = { type: "new", flowerId: flower.id, image: pickImage(flower, used), x: event.clientX, y: event.clientY, moved: false };
-    dragRef.current = start;
-    setDrag(start);
-    trackNew(start, event.clientX, event.clientY);
+    const image = pickImage(flower, used);
+    if (fine) {
+      event.preventDefault();
+      const start: Drag = { type: "new", flowerId: flower.id, image, x: event.clientX, y: event.clientY, moved: false };
+      dragRef.current = start;
+      setDrag(start);
+      trackNew(start, event.clientX, event.clientY);
+      return;
+    }
+    const originX = event.clientX;
+    const originY = event.clientY;
+    let mode: "wait" | "drag" | "scroll" = "wait";
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - originX;
+      const dy = ev.clientY - originY;
+      if (mode === "wait") {
+        if (Math.hypot(dx, dy) < 14) return;
+        if (Math.abs(dx) > Math.abs(dy)) {
+          mode = "scroll";
+          cleanup();
+          return;
+        }
+        mode = "drag";
+      }
+      if (mode !== "drag") return;
+      ev.preventDefault();
+      const next: Drag = { type: "new", flowerId: flower.id, image, x: ev.clientX, y: ev.clientY, moved: true };
+      dragRef.current = next;
+      setDrag(next);
+      setOver(inStage(ev.clientX, ev.clientY));
+    };
+    const up = (ev: PointerEvent) => {
+      cleanup();
+      const dragged = mode === "drag";
+      dragRef.current = null;
+      setDrag(null);
+      setOver(false);
+      if (!dragged) {
+        place(flower.id, null, image);
+        return;
+      }
+      if (inStage(ev.clientX, ev.clientY)) place(flower.id, localPoint(ev.clientX, ev.clientY), image);
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   }
 
   function takeStem(event: React.PointerEvent, stem: Stem) {
@@ -436,13 +486,16 @@ export function FlowerGame() {
     let moved = false;
     let recorded = false;
     const move = (ev: PointerEvent) => {
-      if (Math.hypot(ev.clientX - origin.x, ev.clientY - origin.y) > 4) {
+      if (pinch.current || pointers.current.size > 1) return;
+      if (Math.hypot(ev.clientX - origin.x, ev.clientY - origin.y) > 8) {
         moved = true;
         if (!recorded) {
           recorded = true;
           remember();
         }
       }
+      if (!moved) return;
+      ev.preventDefault();
       const point = localPoint(ev.clientX, ev.clientY);
       const near = stemsRef.current.find((item) => item.id !== stem.id && Math.hypot(item.x - point.x, item.y - point.y) < 78);
       setAssist(near ? { x: near.x, y: near.y } : null);
@@ -452,15 +505,15 @@ export function FlowerGame() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setAssist(null);
-      if (!moved) return;
-      if (!inStage(ev.clientX, ev.clientY)) {
+      if (!moved || pinch.current) return;
+      if (fine && !inStage(ev.clientX, ev.clientY)) {
         removeStem(stem.id, false);
         return;
       }
       const point = localPoint(ev.clientX, ev.clientY);
       setStems((current) => current.map((item) => (item.id === stem.id ? easeApart({ ...item, ...point }, current) : item)));
     };
-    window.addEventListener("pointermove", move);
+    window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", up);
   }
 
@@ -524,21 +577,37 @@ export function FlowerGame() {
   function renderVase(flower: FridgeFlower, compact = false) {
     const lit = focus.includes(flower.id);
     const standing = flower.images.slice(0, 3);
+    if (compact) {
+      const src = flower.images[0];
+      return (
+        <button
+          key={`m-${flower.id}`}
+          type="button"
+          disabled={!flower.available}
+          onPointerDown={(event) => takeFlower(event, flower)}
+          className={`w-[5.25rem] shrink-0 snap-start ${flower.available ? "" : "opacity-45"}`}
+          style={{ touchAction: "pan-x" }}
+        >
+          <span className="grid h-16 place-items-end overflow-hidden rounded-2xl bg-white/70">
+            {src ? <img src={src} alt="" draggable={false} className="h-[115%] w-full object-contain object-bottom" /> : <span className="pb-6 text-xs text-black/35">Пусто</span>}
+          </span>
+          <span className="mt-1 block text-center text-[12px] leading-tight text-black/75">
+            {flower.name}
+            <span className="block text-[10px] text-black/45">{flower.available ? rub(flower.price) : "Сейчас нет"}</span>
+          </span>
+        </button>
+      );
+    }
     return (
       <button
-        key={`${compact ? "m" : "d"}-${flower.id}`}
+        key={`d-${flower.id}`}
         type="button"
         disabled={!flower.available}
         onPointerDown={(event) => takeFlower(event, flower)}
-        onClick={() => {
-          if (!fine) place(flower.id, null);
-        }}
         onMouseEnter={() => setHoverId(flower.id)}
         onMouseLeave={() => setHoverId((current) => (current === flower.id ? null : current))}
-        className={`group ${compact ? "relative h-44 w-28 shrink-0" : `absolute ${vaseSpot[flower.shelf][flower.spot]}`} ${
-          flower.available ? "" : "cursor-not-allowed opacity-45"
-        }`}
-        style={{ touchAction: fine ? "none" : "pan-x" }}
+        className={`group absolute ${vaseSpot[flower.shelf][flower.spot]} ${flower.available ? "" : "cursor-not-allowed opacity-45"}`}
+        style={{ touchAction: "none" }}
       >
         <span className="absolute inset-x-0 bottom-[6%] top-0">
           {standing.map((src, index) => (
@@ -573,60 +642,60 @@ export function FlowerGame() {
     const flower = getFridgeFlower(stem.flowerId);
     if (!flower) return null;
     const head = view === "above";
-    const size = (head ? 96 : 250) * flower.visualScale;
+    const size = (head ? (fine ? 96 : 72) : fine ? 250 : 150) * flower.visualScale;
     const active = selected === stem.id && interactive;
     const wrap = phase === "pack" || phase === "card" || phase === "final";
     const x = wrap ? stem.x * 0.38 : stem.x;
     const y = wrap ? stem.y * 0.2 + 6 : stem.y;
     const rotation = wrap ? stem.rotation * 0.25 : stem.rotation;
+    const boxW = head ? size : size * 0.48;
     return (
-      <div
-        key={stem.id}
-        className="absolute"
-        style={{
-          left: `calc(50% + ${x}px)`,
-          top: `calc(50% + ${y}px)`,
-          width: head ? size : size * 0.48,
-          height: size,
-          transform: `translate(-50%, -50%) rotate(${rotation}deg) scale(${stem.scale})`,
-          transformOrigin: "center center",
-          zIndex: stem.z,
-        }}
-      >
-        <button
-          type="button"
-          aria-label={flower.name}
-          disabled={!interactive}
-          onPointerDown={(event) => interactive && takeStem(event, stem)}
-          className={`h-full w-full ${active ? "rounded-full ring-2 ring-[#1B2621]/50" : ""}`}
-          style={{ touchAction: "none" }}
+      <div key={stem.id} className="pointer-events-none absolute" style={{ left: `calc(50% + ${x}px)`, top: `calc(50% + ${y}px)`, zIndex: stem.z }}>
+        <div
+          className="pointer-events-auto"
+          style={{
+            width: boxW,
+            height: size,
+            transform: `translate(-50%, -50%) rotate(${rotation}deg) scale(${stem.scale})`,
+            transformOrigin: "center center",
+          }}
         >
-          {head ? (
-            <span className="block h-full w-full overflow-hidden rounded-full shadow-soft">
+          <button
+            type="button"
+            aria-label={flower.name}
+            disabled={!interactive}
+            onPointerDown={(event) => interactive && takeStem(event, stem)}
+            className={`h-full w-full ${active ? "rounded-full ring-2 ring-[#1B2621]/70" : ""}`}
+            style={{ touchAction: "none" }}
+          >
+            {head ? (
+              <span className="block h-full w-full overflow-hidden rounded-full shadow-soft">
+                <img
+                  src={stem.image}
+                  alt=""
+                  draggable={false}
+                  className="h-[240%] w-full object-cover object-top"
+                  style={{ transform: stem.flip ? "scaleX(-1)" : undefined }}
+                />
+              </span>
+            ) : (
               <img
                 src={stem.image}
                 alt=""
                 draggable={false}
-                className="h-[240%] w-full object-cover object-top"
-                style={{ transform: stem.flip ? "scaleX(-1)" : undefined }}
+                className="h-full w-full object-contain"
+                style={{ transform: stem.flip ? "scaleX(-1)" : undefined, filter: "drop-shadow(0 14px 10px rgba(80,60,40,0.16))" }}
               />
-            </span>
-          ) : (
-            <img
-              src={stem.image}
-              alt=""
-              draggable={false}
-              className="h-full w-full object-contain"
-              style={{ transform: stem.flip ? "scaleX(-1)" : undefined, filter: "drop-shadow(0 14px 10px rgba(80,60,40,0.16))" }}
-            />
-          )}
-        </button>
+            )}
+          </button>
+        </div>
         {active && (
           <button
             type="button"
             aria-label="Повернуть"
             onPointerDown={(event) => rotateStem(event, stem)}
-            className="absolute left-1/2 top-0 z-10 h-4 w-4 -translate-x-1/2 -translate-y-5 rounded-full border border-white bg-cta"
+            className="pointer-events-auto absolute left-1/2 z-10 h-11 w-11 -translate-x-1/2 rounded-full border-2 border-white bg-cta shadow-soft lg:h-5 lg:w-5"
+            style={{ top: -(size * stem.scale) / 2 - 36, touchAction: "none" }}
           />
         )}
       </div>
@@ -640,7 +709,7 @@ export function FlowerGame() {
       <section className="stage grid min-h-[calc(100vh-8rem)] items-center gap-10 py-10 lg:grid-cols-2">
         <div>
           <p className="eyebrow">Игра флориста</p>
-          <h1 className="mt-3 font-serif text-6xl leading-[0.92] md:text-7xl">Собери букет своими руками</h1>
+          <h1 className="mt-3 font-serif text-5xl leading-[0.92] sm:text-6xl md:text-7xl">Собери букет своими руками</h1>
           <p className="mt-5 max-w-md text-base leading-7 text-black/65">
             Зайди в холодильник, возьми отдельный цветок и положи его на стол. Двигай, поворачивай и прячь за другими.
           </p>
@@ -658,21 +727,25 @@ export function FlowerGame() {
   const showEditor = phase === "play" && !looking;
 
   return (
-    <div className="pb-36">
-      <div className={`stage grid items-start gap-6 py-6 ${looking ? "" : "lg:grid-cols-12"} lg:py-8`}>
+    <div className="pb-32 lg:pb-36">
+      <div
+        className={`stage grid gap-3 py-3 lg:grid lg:items-start lg:gap-6 lg:py-8 ${looking ? "" : "lg:grid-cols-12"} ${
+          phase === "play" && !looking ? "max-lg:flex max-lg:h-[calc(100dvh-15.25rem)] max-lg:flex-col max-lg:overflow-hidden" : ""
+        }`}
+      >
         {showEditor && (
-          <section className="order-2 lg:order-1 lg:col-span-5">
-            <div className="mb-3">
-              <p className="eyebrow">Холодильник SECRET</p>
-              <h1 className="mt-1 font-serif text-4xl leading-none">Возьми цветок</h1>
-              <div className="mt-3 flex flex-wrap gap-2">
+          <section className="order-1 shrink-0 lg:col-span-5">
+            <div className="mb-2 lg:mb-3">
+              <p className="eyebrow hidden lg:block">Холодильник SECRET</p>
+              <h1 className="font-serif text-2xl leading-none lg:mt-1 lg:text-4xl">Возьми цветок</h1>
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:mt-3 lg:flex-wrap">
                 {filters.map((item) => (
-                  <button key={item.id} type="button" onClick={() => setFilter(item.id)} className={`rounded-full px-3 py-1 text-xs ${filter === item.id ? "bg-cta text-ivory" : "bg-white text-black/55"}`}>
+                  <button key={item.id} type="button" onClick={() => setFilter(item.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs lg:py-1 ${filter === item.id ? "bg-cta text-ivory" : "bg-white text-black/55"}`}>
                     {item.label}
                   </button>
                 ))}
               </div>
-              <button type="button" onClick={() => setHelper((value) => !value)} className="mt-3 text-xs uppercase tracking-[0.14em] text-black/45">
+              <button type="button" onClick={() => setHelper((value) => !value)} className="mt-3 hidden text-xs uppercase tracking-[0.14em] text-black/45 lg:inline">
                 Не знаешь, с чего начать?
               </button>
             </div>
@@ -685,7 +758,8 @@ export function FlowerGame() {
                 ))}
               </div>
             )}
-            <div className="flex gap-3 overflow-x-auto pb-2 lg:hidden">{visibleFlowers.map((flower) => renderVase(flower, true))}</div>
+            <p className="mb-2 text-xs text-black/45 lg:hidden">Нажми на цветок или потяни его вверх на стол.</p>
+            <div className="-mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-1 lg:hidden">{visibleFlowers.map((flower) => renderVase(flower, true))}</div>
             <div className="relative hidden h-[680px] overflow-hidden rounded-[32px] border border-white/80 bg-gradient-to-b from-[#f7fbfb] via-[#e4eef1] to-[#d3e2e6] shadow-soft lg:block">
               <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-white/50 to-transparent" />
               <span className="pointer-events-none absolute inset-x-4 top-[35%] h-2 rounded-full bg-white/70" />
@@ -706,15 +780,15 @@ export function FlowerGame() {
           </section>
         )}
 
-        <section className={looking ? "" : "order-1 lg:order-2 lg:col-span-7"}>
-          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <section className={`${looking ? "" : "order-2 lg:col-span-7"} ${phase === "play" ? "flex min-h-0 flex-1 flex-col" : ""}`}>
+          <div className="mb-2 flex shrink-0 flex-col gap-2 lg:mb-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="eyebrow">{phase === "play" ? (looking ? "Твой букет" : "Рабочий стол") : phase === "pack" ? "Упаковка" : phase === "card" ? "Открытка" : "Готово"}</p>
-              {phase === "pack" && <h2 className="mt-1 font-serif text-4xl">Упакуй свой SECRET</h2>}
-              {phase === "card" && <h2 className="mt-1 font-serif text-4xl">Добавь SECRET moment</h2>}
-              {phase === "final" && <h2 className="mt-1 font-serif text-5xl">Твой SECRET готов.</h2>}
+              {phase === "pack" && <h2 className="mt-1 font-serif text-3xl lg:text-4xl">Упакуй свой SECRET</h2>}
+              {phase === "card" && <h2 className="mt-1 font-serif text-3xl lg:text-4xl">Добавь SECRET moment</h2>}
+              {phase === "final" && <h2 className="mt-1 font-serif text-4xl lg:text-5xl">Твой SECRET готов.</h2>}
             </div>
-            <div className="flex flex-wrap gap-2 text-sm">
+            <div className="flex min-w-0 flex-wrap gap-2 text-sm">
               <button type="button" onClick={() => setView("stems")} className={`rounded-full px-3 py-1 ${view === "stems" ? "bg-cta text-ivory" : "bg-white"}`}>
                 Стебли
               </button>
@@ -731,7 +805,10 @@ export function FlowerGame() {
 
           <div
             ref={stageRef}
-            className={`relative overflow-hidden rounded-[36px] bg-gradient-to-b from-[#fbf7f2] to-[#efe4d8] ${phase === "play" ? "h-[460px] md:h-[520px]" : "h-[420px]"} ${over ? "ring-2 ring-[#9AA58F]" : ""}`}
+            className={`relative min-h-0 flex-1 overflow-hidden rounded-[28px] bg-gradient-to-b from-[#fbf7f2] to-[#efe4d8] lg:h-[520px] lg:flex-none lg:rounded-[36px] ${
+              phase === "play" ? "" : "h-[min(420px,70dvh)] max-lg:flex-none"
+            } ${over ? "ring-2 ring-[#9AA58F]" : ""}`}
+            style={{ touchAction: phase === "play" && !looking ? "none" : "manipulation" }}
             onPointerDown={() => {
               if (phase === "play") setSelected(null);
             }}
@@ -774,22 +851,22 @@ export function FlowerGame() {
             {showEditor && selectedStem && selectedFlower && (
               <div
                 onPointerDown={(event) => event.stopPropagation()}
-                className="absolute bottom-3 left-1/2 z-40 flex max-w-[96%] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-full bg-white/95 px-2 py-1.5 text-xs shadow-soft"
+                className="absolute bottom-3 left-1/2 z-40 hidden max-w-[96%] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-full bg-white/95 px-2 py-1.5 text-xs shadow-soft lg:flex"
               >
                 <span className="px-2">
                   {selectedFlower.name} · {rub(selectedFlower.price)}
                 </span>
-                <button type="button" onClick={() => updateStem(selectedStem.id, { scale: clampScale(selectedStem.scale - 0.15) }, true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
+                <button type="button" onClick={() => updateStem(selectedStem.id, (stem) => ({ scale: clampScale(stem.scale - 0.15) }), true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
                   −
                 </button>
                 <span>{Math.round(selectedStem.scale * 100)}%</span>
-                <button type="button" onClick={() => updateStem(selectedStem.id, { scale: clampScale(selectedStem.scale + 0.15) }, true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
+                <button type="button" onClick={() => updateStem(selectedStem.id, (stem) => ({ scale: clampScale(stem.scale + 0.15) }), true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
                   +
                 </button>
-                <button type="button" onClick={() => updateStem(selectedStem.id, { rotation: selectedStem.rotation - 15 }, true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
+                <button type="button" onClick={() => updateStem(selectedStem.id, (stem) => ({ rotation: stem.rotation - 15 }), true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
                   ↺
                 </button>
-                <button type="button" onClick={() => updateStem(selectedStem.id, { rotation: selectedStem.rotation + 15 }, true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
+                <button type="button" onClick={() => updateStem(selectedStem.id, (stem) => ({ rotation: stem.rotation + 15 }), true)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
                   ↻
                 </button>
                 <button type="button" onClick={() => shiftLayer(selectedStem.id, 1)} className="rounded-full bg-[#f6f1ea] px-2 py-1">
@@ -810,19 +887,19 @@ export function FlowerGame() {
           </div>
 
           {showEditor && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-black/55">
-              <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={!canUndo} onClick={undo} className="rounded-full bg-white px-3 py-1 disabled:opacity-30">
+            <div className="mt-2 flex shrink-0 items-center justify-between gap-2 text-sm text-black/55 lg:mt-3">
+              <div className="flex gap-2 overflow-x-auto">
+                <button type="button" disabled={!canUndo} onClick={undo} className="shrink-0 rounded-full bg-white px-3 py-2 disabled:opacity-30">
                   Отменить
                 </button>
-                <button type="button" disabled={!canRedo} onClick={redo} className="rounded-full bg-white px-3 py-1 disabled:opacity-30">
+                <button type="button" disabled={!canRedo} onClick={redo} className="shrink-0 rounded-full bg-white px-3 py-2 disabled:opacity-30">
                   Вернуть
                 </button>
-                <button type="button" onClick={() => setLooking(true)} className="rounded-full bg-white px-3 py-1">
-                  Посмотреть
+                <button type="button" onClick={() => setLooking(true)} className="shrink-0 rounded-full bg-white px-3 py-2">
+                  Смотреть
                 </button>
-                <button type="button" onClick={() => setConfirmReset(true)} className="rounded-full bg-white px-3 py-1">
-                  Начать заново
+                <button type="button" onClick={() => setConfirmReset(true)} className="shrink-0 rounded-full bg-white px-3 py-2">
+                  Заново
                 </button>
               </div>
               <span>{countLabel(stems.length)}</span>
@@ -835,18 +912,21 @@ export function FlowerGame() {
           )}
 
           {showEditor && frontFirst.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-2 hidden shrink-0 lg:mt-4 lg:block">
               <p className="text-[10px] uppercase tracking-[0.16em] text-black/35">Слои · верх списка ближе к тебе</p>
-              <div className="mt-2 flex flex-col gap-1">
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
                 {frontFirst.map((stem) => {
                   const flower = getFridgeFlower(stem.flowerId);
                   return (
                     <button
                       key={stem.id}
                       type="button"
-                      onPointerDown={(event) => startLayerDrag(event, stem.id, frontFirst.map((item) => item.id), remember, orderLayers)}
+                      onPointerDown={(event) => {
+                        if (!fine) return;
+                        startLayerDrag(event, stem.id, frontFirst.map((item) => item.id), remember, orderLayers);
+                      }}
                       onClick={() => setSelected(stem.id)}
-                      className={`rounded-full px-3 py-1 text-left text-sm ${selected === stem.id ? "bg-cta text-ivory" : "bg-white"}`}
+                      className={`shrink-0 rounded-full px-4 py-2 text-left text-sm lg:px-3 lg:py-1 ${selected === stem.id ? "bg-cta text-ivory" : "bg-white"}`}
                     >
                       {flower?.name}
                     </button>
@@ -927,11 +1007,52 @@ export function FlowerGame() {
       </div>
 
       {phase !== "final" && !looking && (
-        <div className="fixed inset-x-0 bottom-16 z-30 border-t border-black/5 bg-[#f6f1ea]/95 px-4 py-3 backdrop-blur md:bottom-0">
-          <div className="stage flex items-center justify-between gap-4">
+        <>
+        {!fine && showEditor && selectedStem && selectedFlower && (
+          <div className="fixed inset-x-0 bottom-[10.25rem] z-[35] px-3 lg:hidden" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="rounded-[24px] bg-white/95 p-2 shadow-soft backdrop-blur">
+              <div className="flex items-center justify-between gap-2 px-2 pb-2 text-sm">
+                <span className="min-w-0 truncate">
+                  {selectedFlower.name} · {Math.round(selectedStem.scale * 100)}%
+                </span>
+                <button type="button" disabled={!canUndo} onClick={undo} className="shrink-0 rounded-full px-2 py-1 text-xs text-black/55 disabled:opacity-30">
+                  Отменить
+                </button>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <FingerButton label="Меньше" onClick={() => updateStem(selectedStem.id, (stem) => ({ scale: clampScale(stem.scale - 0.15) }), true)}>
+                  −
+                </FingerButton>
+                <FingerButton label="Больше" onClick={() => updateStem(selectedStem.id, (stem) => ({ scale: clampScale(stem.scale + 0.15) }), true)}>
+                  +
+                </FingerButton>
+                <FingerButton label="Влево" onClick={() => updateStem(selectedStem.id, (stem) => ({ rotation: stem.rotation - 15 }), true)}>
+                  ↺
+                </FingerButton>
+                <FingerButton label="Вправо" onClick={() => updateStem(selectedStem.id, (stem) => ({ rotation: stem.rotation + 15 }), true)}>
+                  ↻
+                </FingerButton>
+                <FingerButton label="Выше" onClick={() => shiftLayer(selectedStem.id, 1)}>
+                  Выше
+                </FingerButton>
+                <FingerButton label="Ниже" onClick={() => shiftLayer(selectedStem.id, -1)}>
+                  Ниже
+                </FingerButton>
+                <FingerButton label="Дубль" onClick={() => duplicate(selectedStem.id)}>
+                  Дубль
+                </FingerButton>
+                <FingerButton label="Убрать" onClick={() => removeStem(selectedStem.id)}>
+                  Убрать
+                </FingerButton>
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="fixed inset-x-0 bottom-20 z-30 border-t border-black/5 bg-[#f6f1ea]/95 px-4 py-2 backdrop-blur md:bottom-0 md:py-3">
+          <div className="stage flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-[0.16em] text-black/40">Твой букет</p>
-              <p className="font-serif text-3xl">{rub(shownTotal)}</p>
+              <p className="font-serif text-2xl md:text-3xl">{rub(shownTotal)}</p>
               <p className="text-xs text-black/45">{countLabel(stems.length)}</p>
             </div>
             <button
@@ -944,6 +1065,7 @@ export function FlowerGame() {
             </button>
           </div>
         </div>
+        </>
       )}
 
       {drag?.type === "new" && (
@@ -1020,6 +1142,14 @@ function startLayerDrag(event: React.PointerEvent, id: string, order: string[], 
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
+}
+
+function FingerButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" aria-label={label} onClick={onClick} className="min-h-11 rounded-2xl bg-[#f6f1ea] text-sm active:scale-95">
+      {children}
+    </button>
+  );
 }
 
 function clamp(value: number, min: number, max: number) {
