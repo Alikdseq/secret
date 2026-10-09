@@ -1,5 +1,8 @@
 export type Tag = "author" | "roses" | "peonies" | "mono" | "composition" | "gifts";
 
+export type Availability = "in_stock" | "made_to_order" | "sold";
+export type Listing = "published" | "draft" | "hidden" | "archived";
+
 export type Bouquet = {
   slug: string;
   name: string;
@@ -10,6 +13,12 @@ export type Bouquet = {
   image: string;
   hover: string;
   tags: Tag[];
+  availability?: Availability;
+  listing?: Listing;
+  qty?: number;
+  packaging?: string;
+  studioId?: string;
+  locked?: boolean;
 };
 
 export type Flower = {

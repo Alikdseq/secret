@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Heart, Search, ShoppingBag, X } from "lucide-react";
-import { bouquets, flowers } from "@/data/catalog";
+import { flowers } from "@/data/catalog";
+import { StudioSession } from "@/components/studio-session";
+import { usePublicBouquets } from "@/lib/use-public-bouquets";
 import { lineTotal, useShop } from "@/lib/store";
 import { rub } from "@/lib/money";
 
@@ -93,7 +95,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="min-h-[70vh] pb-24 md:pb-0">{children}</main>
+      <main className="min-h-[70vh] pb-24 md:pb-0">
+        <StudioSession>{children}</StudioSession>
+      </main>
       <footer className="mt-20 border-t border-black/[0.06]">
         <div className="stage flex flex-col gap-8 py-12 md:flex-row md:items-end md:justify-between">
           <div>
@@ -102,6 +106,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
               Цветы, которые говорят за тебя. Это демонстрационный макет, не официальный сайт магазина. Цены, составы и
               доставка здесь — демо-данные.
             </p>
+            <Link href="/studio" className="mt-4 inline-block text-xs text-black/35">
+              Для команды SECRET
+            </Link>
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-black/60">
             {links.map(([href, label]) => (
@@ -173,10 +180,11 @@ function SearchOverlay() {
   const setSearchOpen = useShop((s) => s.setSearchOpen);
   const [query, setQuery] = useState("");
   const router = useRouter();
+  const { items: bouquets } = usePublicBouquets();
   const q = query.trim().toLowerCase();
   const foundBouquets = useMemo(
     () => bouquets.filter((item) => `${item.name} ${item.composition} ${item.epithet}`.toLowerCase().includes(q)),
-    [q],
+    [bouquets, q],
   );
   const foundFlowers = useMemo(() => flowers.filter((item) => item.name.toLowerCase().includes(q)), [q]);
 
@@ -240,6 +248,7 @@ function FavDrawer() {
   const favorites = useShop((s) => s.favorites);
   const toggleFav = useShop((s) => s.toggleFav);
   const setFavOpen = useShop((s) => s.setFavOpen);
+  const { items: bouquets } = usePublicBouquets();
   const saved = bouquets.filter((item) => favorites.includes(item.slug));
 
   return (

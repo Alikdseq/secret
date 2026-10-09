@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Hero } from "@/components/hero";
-import { ProductCard } from "@/components/product-card";
-import { bouquets } from "@/data/catalog";
+import { BouquetShelf } from "@/components/bouquet-shelf";
 
 const paths = [
   {
@@ -61,11 +60,7 @@ export default function HomePage() {
             Все композиции
           </Link>
         </div>
-        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {bouquets.slice(0, 3).map((bouquet) => (
-            <ProductCard key={bouquet.slug} bouquet={bouquet} />
-          ))}
-        </div>
+        <BouquetShelf limit={3} />
       </section>
     </>
   );

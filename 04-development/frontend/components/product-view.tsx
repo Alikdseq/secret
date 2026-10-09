@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Heart, Minus, Plus } from "lucide-react";
 import { addons, sizeFactor, sizes, type Bouquet, type SizeId } from "@/data/catalog";
 import { roundPrice, rub } from "@/lib/money";
@@ -15,6 +16,7 @@ export function ProductView({ bouquet }: { bouquet: Bouquet }) {
   const [qty, setQty] = useState(1);
   const [picked, setPicked] = useState<string[]>([]);
   const [shot, setShot] = useState(bouquet.image);
+  const sold = bouquet.availability === "sold";
   const price = roundPrice(bouquet.price * sizeFactor(size));
   const shots = [bouquet.image, bouquet.hover, "/images/quiz-bloom.jpg"];
 
@@ -68,7 +70,8 @@ export function ProductView({ bouquet }: { bouquet: Bouquet }) {
           </button>
         </div>
         <p className="mt-3 text-black/55">{bouquet.composition}</p>
-        <p className="mt-6 font-serif text-4xl">{rub(price)}</p>
+        <p className="mt-6 font-serif text-4xl">{sold ? "Продан" : rub(price)}</p>
+        {bouquet.availability === "made_to_order" && <p className="mt-2 text-sm text-black/50">Можно собрать под заказ</p>}
         <p className="mt-6 text-sm text-black/50">Размер</p>
         <div className="mt-2 flex gap-2">
           {sizes.map((item) => (
@@ -91,20 +94,26 @@ export function ProductView({ bouquet }: { bouquet: Bouquet }) {
             );
           })}
         </div>
-        <div className="mt-6 flex items-center gap-3">
-          <div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
-            <button type="button" aria-label="Меньше" onClick={() => setQty((value) => Math.max(1, value - 1))}>
-              <Minus size={16} />
-            </button>
-            <span>{qty}</span>
-            <button type="button" aria-label="Больше" onClick={() => setQty((value) => value + 1)}>
-              <Plus size={16} />
+        {sold ? (
+          <Link href="/create" className="btn-primary mt-6 inline-flex">
+            Можно собрать похожий
+          </Link>
+        ) : (
+          <div className="mt-6 flex items-center gap-3">
+            <div className="flex items-center gap-3 rounded-full bg-white px-3 py-2">
+              <button type="button" aria-label="Меньше" onClick={() => setQty((value) => Math.max(1, value - 1))}>
+                <Minus size={16} />
+              </button>
+              <span>{qty}</span>
+              <button type="button" aria-label="Больше" onClick={() => setQty((value) => value + 1)}>
+                <Plus size={16} />
+              </button>
+            </div>
+            <button type="button" onClick={toCart} className="btn-primary flex-1">
+              Добавить в корзину
             </button>
           </div>
-          <button type="button" onClick={toCart} className="btn-primary flex-1">
-            Добавить в корзину
-          </button>
-        </div>
+        )}
         <div className="mt-10 grid gap-4 md:grid-cols-2">
           <article className="rounded-[24px] bg-white/70 p-5">
             <h2 className="font-serif text-2xl">Почему этот букет особенный?</h2>

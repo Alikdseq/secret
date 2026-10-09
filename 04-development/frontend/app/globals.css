@@ -44,6 +44,10 @@ body {
     @apply mx-auto w-full max-w-stage px-5 md:px-10;
   }
 
+  .field {
+    @apply min-h-12 w-full rounded-2xl bg-[#f6f1ea] px-4 py-3 text-base outline-none;
+  }
+
   .panel {
     @apply rounded-[28px] border border-black/[0.06] bg-paper/80 shadow-soft;
   }

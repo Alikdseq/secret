@@ -7,6 +7,7 @@ import {
   compositionLines,
   fridgeFlowers,
   gamePacks,
+  type GamePack,
   getFridgeFlower,
   moodHints,
   openingSpot,
@@ -63,6 +64,7 @@ export function FlowerGame() {
   const [view, setView] = useState<View>("stems");
   const [looking, setLooking] = useState(false);
   const [packId, setPackId] = useState(gamePacks[0].id);
+  const [packList, setPackList] = useState<GamePack[]>(gamePacks);
   const [cardId, setCardId] = useState<(typeof cardStyles)[number]["id"]>("none");
   const [note, setNote] = useState("");
   const [hideSender, setHideSender] = useState(false);
@@ -80,7 +82,30 @@ export function FlowerGame() {
   const [canRedo, setCanRedo] = useState(false);
 
   stemsRef.current = stems;
-  const pack = gamePacks.find((item) => item.id === packId) ?? gamePacks[0];
+  const pack = packList.find((item) => item.id === packId) ?? packList[0];
+
+  useEffect(() => {
+    let stop = false;
+    fetch("/api/studio/packs")
+      .then((response) => response.json())
+      .then((data: { packs?: { id: string; name: string; price: number; description: string; color: string; ink: string }[] }) => {
+        if (stop || !data.packs?.length) return;
+        setPackList(
+          data.packs.map((item) => ({
+            id: item.id,
+            label: item.name,
+            line: item.description,
+            price: item.price,
+            color: item.color || "#F3E6D6",
+            ink: item.ink || "#171717",
+          })),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, []);
   const card = cardStyles.find((item) => item.id === cardId) ?? cardStyles[0];
   const flowerSum = stems.reduce((sum, stem) => sum + (getFridgeFlower(stem.flowerId)?.price ?? 0), 0);
   const cardPrice = card.id === "none" ? 0 : reward ? 0 : card.price;
@@ -341,6 +366,13 @@ export function FlowerGame() {
     setHint(false);
     setFlash(`+${rub(flower.price)}`);
     setSelected(id);
+    if (!fine) {
+      const stage = stageRef.current;
+      const rect = stage?.getBoundingClientRect();
+      if (stage && rect && (rect.top > window.innerHeight * 0.4 || rect.bottom < 160)) {
+        stage.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
   }
 
   function updateStem(id: string, patch: Partial<Stem> | ((stem: Stem) => Partial<Stem>), keepHistory = false) {
@@ -442,7 +474,7 @@ export function FlowerGame() {
       const dy = ev.clientY - originY;
       if (mode === "wait") {
         if (Math.hypot(dx, dy) < 14) return;
-        if (Math.abs(dx) > Math.abs(dy)) {
+        if (Math.abs(dy) >= Math.abs(dx)) {
           mode = "scroll";
           cleanup();
           return;
@@ -545,7 +577,7 @@ export function FlowerGame() {
     setCardId("none");
     setNote("");
     setHideSender(false);
-    setPackId(gamePacks[0].id);
+    setPackId(packList[0].id);
     setConfirmReset(false);
     setLooking(false);
   }
@@ -574,30 +606,9 @@ export function FlowerGame() {
     router.push("/cart");
   }
 
-  function renderVase(flower: FridgeFlower, compact = false) {
+  function renderVase(flower: FridgeFlower) {
     const lit = focus.includes(flower.id);
     const standing = flower.images.slice(0, 3);
-    if (compact) {
-      const src = flower.images[0];
-      return (
-        <button
-          key={`m-${flower.id}`}
-          type="button"
-          disabled={!flower.available}
-          onPointerDown={(event) => takeFlower(event, flower)}
-          className={`w-[5.25rem] shrink-0 snap-start ${flower.available ? "" : "opacity-45"}`}
-          style={{ touchAction: "pan-x" }}
-        >
-          <span className="grid h-16 place-items-end overflow-hidden rounded-2xl bg-white/70">
-            {src ? <img src={src} alt="" draggable={false} className="h-[115%] w-full object-contain object-bottom" /> : <span className="pb-6 text-xs text-black/35">Пусто</span>}
-          </span>
-          <span className="mt-1 block text-center text-[12px] leading-tight text-black/75">
-            {flower.name}
-            <span className="block text-[10px] text-black/45">{flower.available ? rub(flower.price) : "Сейчас нет"}</span>
-          </span>
-        </button>
-      );
-    }
     return (
       <button
         key={`d-${flower.id}`}
@@ -607,7 +618,7 @@ export function FlowerGame() {
         onMouseEnter={() => setHoverId(flower.id)}
         onMouseLeave={() => setHoverId((current) => (current === flower.id ? null : current))}
         className={`group absolute ${vaseSpot[flower.shelf][flower.spot]} ${flower.available ? "" : "cursor-not-allowed opacity-45"}`}
-        style={{ touchAction: "none" }}
+        style={{ touchAction: fine ? "none" : "pan-y" }}
       >
         <span className="absolute inset-x-0 bottom-[6%] top-0">
           {standing.map((src, index) => (
@@ -617,7 +628,7 @@ export function FlowerGame() {
               alt=""
               className="absolute bottom-0 max-w-none object-contain transition duration-300 group-hover:-translate-y-1"
               style={{
-                height: compact ? "92%" : "100%",
+                height: "100%",
                 left: `${42 + index * 10}%`,
                 transform: `translateX(-50%) rotate(${[-7, 5, 12][index]}deg) scale(${lit ? 1.04 : 1})`,
                 transformOrigin: "center bottom",
@@ -642,7 +653,7 @@ export function FlowerGame() {
     const flower = getFridgeFlower(stem.flowerId);
     if (!flower) return null;
     const head = view === "above";
-    const size = (head ? (fine ? 96 : 72) : fine ? 250 : 150) * flower.visualScale;
+    const size = (head ? 96 : 250) * flower.visualScale;
     const active = selected === stem.id && interactive;
     const wrap = phase === "pack" || phase === "card" || phase === "final";
     const x = wrap ? stem.x * 0.38 : stem.x;
@@ -728,15 +739,11 @@ export function FlowerGame() {
 
   return (
     <div className="pb-32 lg:pb-36">
-      <div
-        className={`stage grid gap-3 py-3 lg:grid lg:items-start lg:gap-6 lg:py-8 ${looking ? "" : "lg:grid-cols-12"} ${
-          phase === "play" && !looking ? "max-lg:flex max-lg:h-[calc(100dvh-15.25rem)] max-lg:flex-col max-lg:overflow-hidden" : ""
-        }`}
-      >
+      <div className={`stage grid gap-8 py-4 lg:grid lg:items-start lg:gap-6 lg:py-8 ${looking ? "" : "lg:grid-cols-12"}`}>
         {showEditor && (
-          <section className="order-1 shrink-0 lg:col-span-5">
+          <section className="order-2 lg:order-1 lg:col-span-5">
             <div className="mb-2 lg:mb-3">
-              <p className="eyebrow hidden lg:block">Холодильник SECRET</p>
+              <p className="eyebrow">Холодильник SECRET</p>
               <h1 className="font-serif text-2xl leading-none lg:mt-1 lg:text-4xl">Возьми цветок</h1>
               <div className="mt-2 flex gap-2 overflow-x-auto pb-1 lg:mt-3 lg:flex-wrap">
                 {filters.map((item) => (
@@ -758,9 +765,8 @@ export function FlowerGame() {
                 ))}
               </div>
             )}
-            <p className="mb-2 text-xs text-black/45 lg:hidden">Нажми на цветок или потяни его вверх на стол.</p>
-            <div className="-mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-1 lg:hidden">{visibleFlowers.map((flower) => renderVase(flower, true))}</div>
-            <div className="relative hidden h-[680px] overflow-hidden rounded-[32px] border border-white/80 bg-gradient-to-b from-[#f7fbfb] via-[#e4eef1] to-[#d3e2e6] shadow-soft lg:block">
+            <p className="mb-2 text-xs text-black/45 lg:hidden">Нажми цветок в вазе — он ляжет на стол выше.</p>
+            <div className="relative h-[min(760px,calc(100svh-7rem))] min-h-[560px] overflow-hidden rounded-[32px] border border-white/80 bg-gradient-to-b from-[#f7fbfb] via-[#e4eef1] to-[#d3e2e6] shadow-soft lg:h-[680px] lg:min-h-0">
               <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-white/50 to-transparent" />
               <span className="pointer-events-none absolute inset-x-4 top-[35%] h-2 rounded-full bg-white/70" />
               <span className="pointer-events-none absolute inset-x-4 top-[67%] h-2 rounded-full bg-white/60" />
@@ -780,7 +786,7 @@ export function FlowerGame() {
           </section>
         )}
 
-        <section className={`${looking ? "" : "order-2 lg:col-span-7"} ${phase === "play" ? "flex min-h-0 flex-1 flex-col" : ""}`}>
+        <section className={`${looking ? "" : "order-1 lg:order-2 lg:col-span-7"}`}>
           <div className="mb-2 flex shrink-0 flex-col gap-2 lg:mb-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="eyebrow">{phase === "play" ? (looking ? "Твой букет" : "Рабочий стол") : phase === "pack" ? "Упаковка" : phase === "card" ? "Открытка" : "Готово"}</p>
@@ -805,10 +811,12 @@ export function FlowerGame() {
 
           <div
             ref={stageRef}
-            className={`relative min-h-0 flex-1 overflow-hidden rounded-[28px] bg-gradient-to-b from-[#fbf7f2] to-[#efe4d8] lg:h-[520px] lg:flex-none lg:rounded-[36px] ${
-              phase === "play" ? "" : "h-[min(420px,70dvh)] max-lg:flex-none"
+            className={`relative overflow-hidden rounded-[28px] bg-gradient-to-b from-[#fbf7f2] to-[#efe4d8] lg:rounded-[36px] ${
+              phase === "play"
+                ? "h-[min(760px,calc(100svh-7rem))] min-h-[560px] lg:h-[520px] lg:min-h-0"
+                : "h-[min(520px,72svh)] min-h-[380px] lg:h-[520px]"
             } ${over ? "ring-2 ring-[#9AA58F]" : ""}`}
-            style={{ touchAction: phase === "play" && !looking ? "none" : "manipulation" }}
+            style={{ touchAction: phase === "play" && !looking ? (fine ? "none" : "pan-y") : "manipulation" }}
             onPointerDown={() => {
               if (phase === "play") setSelected(null);
             }}
@@ -844,7 +852,7 @@ export function FlowerGame() {
             )}
             {hint && stems.length === 0 && phase === "play" && (
               <p className="pointer-events-none absolute bottom-16 left-0 right-0 text-center text-sm text-black/50">
-                {fine ? "Перетащи цветок на стол" : "Нажми на цветок — он ляжет на стол"}
+                {fine ? "Перетащи цветок на стол" : "Холодильник с вазами — ниже. Нажми цветок, и он ляжет сюда."}
               </p>
             )}
             {flash && <p className="pointer-events-none absolute right-5 top-5 z-30 rounded-full bg-cta px-4 py-2 text-sm text-ivory">{flash}</p>}
@@ -938,7 +946,7 @@ export function FlowerGame() {
 
           {phase === "pack" && (
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {gamePacks.map((item) => (
+              {packList.map((item) => (
                 <button key={item.id} type="button" onClick={() => setPackId(item.id)} className={`rounded-[28px] p-4 text-left ${packId === item.id ? "ring-2 ring-[#1B2621]" : "bg-white"}`} style={{ background: item.color, color: item.ink }}>
                   <span className="block font-serif text-2xl">{item.label}</span>
                   <span className="mt-1 block text-xs opacity-70">{item.line}</span>
