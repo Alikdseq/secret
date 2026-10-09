@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --ivory: #f6f1ea;
+  --ink: #171717;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--ivory);
+  color: var(--ink);
+  font-family: var(--font-sans), sans-serif;
+}
+
+::selection {
+  background: #e7cfc8;
+  color: #171717;
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-[11px] uppercase tracking-[0.22em] text-black/45;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-cta px-6 py-3.5 text-[11px] uppercase tracking-[0.18em] text-ivory transition hover:bg-[#121a17];
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center rounded-full border border-black/15 bg-white/50 px-6 py-3.5 text-[11px] uppercase tracking-[0.18em] transition hover:bg-white;
+  }
+
+  .btn-line {
+    @apply inline-flex items-center justify-center rounded-full border border-black/10 bg-white px-5 py-3 text-[11px] uppercase tracking-[0.16em] transition hover:border-black/30;
+  }
+
+  .stage {
+    @apply mx-auto w-full max-w-stage px-5 md:px-10;
+  }
+
+  .panel {
+    @apply rounded-[28px] border border-black/[0.06] bg-paper/80 shadow-soft;
+  }
+}
+
+@keyframes floaty {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-7px);
+  }
+  75% {
+    transform: translateX(7px);
+  }
+}
+
+.floaty {
+  animation: floaty 7s ease-in-out infinite;
+}
+
+.shake {
+  animation: shake 0.35s ease;
+}
+
+.lift img {
+  transition: transform 0.7s ease;
+}
+
+.lift:hover img {
+  transform: scale(1.05) translateY(-8px);
+}

@@ -1,0 +1,31 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { ProductCard } from "@/components/product-card";
+import { bouquets, categories, type Tag } from "@/data/catalog";
+
+export default function BouquetsPage() {
+  const [tag, setTag] = useState<"all" | Tag>("all");
+  const list = useMemo(() => (tag === "all" ? bouquets : bouquets.filter((item) => item.tags.includes(tag))), [tag]);
+
+  return (
+    <div className="stage py-10">
+      <p className="eyebrow">Каталог</p>
+      <h1 className="mt-2 font-serif text-6xl md:text-7xl">Букеты</h1>
+      <p className="mt-3 max-w-xl text-black/60">Авторские композиции, которые говорят без слов.</p>
+      <div className="mt-8 flex flex-wrap gap-2">
+        {categories.map((item) => (
+          <button key={item.id} type="button" onClick={() => setTag(item.id)} className={`rounded-full px-4 py-2 text-sm ${tag === item.id ? "bg-cta text-ivory" : "bg-white"}`}>
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {list.map((bouquet) => (
+          <ProductCard key={bouquet.slug} bouquet={bouquet} />
+        ))}
+      </div>
+      {list.length === 0 && <p className="mt-10 text-black/50">В этой полке демо пока пусто.</p>}
+    </div>
+  );
+}
