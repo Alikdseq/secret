@@ -737,7 +737,7 @@ export function FlowerGame() {
             }}
           >
             <div className="pointer-events-none absolute inset-x-[18%] bottom-[8%] h-24 rounded-[50%] bg-[#e4d3c4]/70 blur-[2px]" />
-            {phase !== "play" && phase !== "intro" && (
+            {phase !== "play" && (
               <span
                 className="pointer-events-none absolute left-1/2 top-[54%] h-[42%] w-[42%] -translate-x-1/2 shadow-[0_18px_30px_rgba(40,30,20,0.12)] transition-all duration-700"
                 style={{
@@ -811,7 +811,7 @@ export function FlowerGame() {
 
           {showEditor && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-black/55">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button type="button" disabled={!canUndo} onClick={undo} className="rounded-full bg-white px-3 py-1 disabled:opacity-30">
                   Отменить
                 </button>
